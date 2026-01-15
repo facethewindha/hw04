@@ -13,6 +13,8 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import Dataset, DataLoader, random_split
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
+from conformer import ConformerBlock
+
 
 
 # -----------------------------
@@ -125,34 +127,62 @@ def get_dataloader(data_dir: str, batch_size: int, n_workers: int):
 class Classifier(nn.Module):
     def __init__(self, d_model=512, n_spks=600, dropout=0.1):
         super().__init__()
+        # Project the dimension of features from that of input into d_model.
         self.prenet = nn.Linear(40, d_model)
+        # TODO:
+        #   Change Transformer to Conformer.
+        #   https://arxiv.org/abs/2005.08100
 
-        # Transformer encoder layer (default batch_first=False)
-        self.encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=16,
-            dim_feedforward=256,
-            dropout=dropout,
-            activation="relu",
+        # 对于文本分类等下游任务，只需要用到Encoder部分即可
+        # nhead:multi_head_attention中head个数
+        # d_model:输入的feature的个数
+        # dim_feedforward:feedforward network的维度
+        # dropout默认0.1
+        # self.encoder_layer = nn.TransformerEncoderLayer(
+        # d_model=d_model, dim_feedforward=256, nhead=8
+        # )
+        # self.encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=2)
+        self.conformer_block = ConformerBlock(
+            dim=d_model,
+            dim_head=64,
+            heads=8,
+            ff_mult=4,
+            conv_expansion_factor=2,
+            conv_kernel_size=31,
+            attn_dropout=dropout,
+            ff_dropout=dropout,
+            conv_dropout=dropout
         )
-
+        # Project the the dimension of features from d_model into speaker nums.
         self.pred_layer = nn.Sequential(
-            nn.Linear(d_model, 2*d_model),
-            nn.Sigmoid(),
-            nn.Linear(2*d_model, n_spks),
+            # nn.Linear(d_model, d_model),
+            # nn.ReLU(),
+            nn.Linear(d_model, n_spks),
         )
 
     def forward(self, mels):
-        # mels: (B, T, 40)
-        out = self.prenet(mels)          # (B, T, d_model)
-        out = out.permute(1, 0, 2)       # (T, B, d_model) for TransformerEncoderLayer
-        out = self.encoder_layer(out)    # (T, B, d_model)
-        out = out.transpose(0, 1)        # (B, T, d_model)
+        """
+        args:
+            mels: (batch size, length, 40)
+        return:
+            out: (batch size, n_spks)
+        """
+        # out: (batch size, length, d_model)   length=segment_len
+        out = self.prenet(mels)
+        # out: (length, batch size, d_model)
+        out = out.permute(1, 0, 2)  # 交换dim=0和dim=1
+        # The encoder layer expect features in the shape of (length, batch size, d_model).
+        out = self.conformer_block(out)
+        # out: (batch size, length, d_model)
+        out = out.transpose(0, 1)  # 转置dim=0和dim=1
+        # mean pooling
+        stats = out.mean(dim=1)  # 可以理解为求平均并去除维度1  stats.size():（batch_size,d_model）
 
-        # mean pooling over time
-        stats = out.mean(dim=1)          # (B, d_model)
-        out = self.pred_layer(stats)     # (B, n_spks)
+        # out: (batch, n_spks)
+        out = self.pred_layer(stats)
         return out
+
+
 
 
 # -----------------------------
@@ -299,7 +329,7 @@ def parse_args():
     mode: "train" or "infer"
     """
     config = {
-        "mode": "train",          # 改成 "infer" 就走推理
+        "mode": "infer",          # 改成 "infer" 就走推理
         "data_dir": "./Dataset",
         "save_path": "model.ckpt",
 
