@@ -123,23 +123,23 @@ def get_dataloader(data_dir: str, batch_size: int, n_workers: int):
 # Model
 # -----------------------------
 class Classifier(nn.Module):
-    def __init__(self, d_model=80, n_spks=600, dropout=0.1):
+    def __init__(self, d_model=512, n_spks=600, dropout=0.1):
         super().__init__()
         self.prenet = nn.Linear(40, d_model)
 
         # Transformer encoder layer (default batch_first=False)
         self.encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
-            nhead=2,
+            nhead=16,
             dim_feedforward=256,
             dropout=dropout,
             activation="relu",
         )
 
         self.pred_layer = nn.Sequential(
-            nn.Linear(d_model, d_model),
+            nn.Linear(d_model, 2*d_model),
             nn.Sigmoid(),
-            nn.Linear(d_model, n_spks),
+            nn.Linear(2*d_model, n_spks),
         )
 
     def forward(self, mels):
@@ -305,7 +305,7 @@ def parse_args():
 
         # train
         "batch_size": 32,
-        "n_workers": 2,
+        "n_workers": 4,
         "valid_steps": 2000,
         "warmup_steps": 1000,
         "save_steps": 10000,
