@@ -1,0 +1,10 @@
+.idea/
+__pycache__/
+.venv/
+.ipynb_checkpoints/
+
+Dataset/
+*.ckpt
+*.csv
+*.log
+codespace/
